@@ -7,9 +7,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{FutureExt, Sink};
+use futures::Sink;
 
-use crate::WorkFn;
+use crate::{Async, WorkFn};
 
 /// A no-op `Sink` type that is used as the default `tx` and `panic_tx` of a `Builder`.
 #[derive(Clone)]
@@ -49,7 +49,7 @@ pub struct NoopInitFn;
 
 impl WorkFn<(), ()> for NoopInitFn {
     fn work(&self, _req: ()) -> Pin<Box<dyn Future<Output = ()>>> {
-        async {}.boxed_local()
+        Box::pin(async {})
     }
 }
 
@@ -58,11 +58,11 @@ pub struct InitFn<Fut> {
     pub(crate) inner: Box<dyn Fn() -> Fut + Send + 'static>,
 }
 
-impl<Fut> WorkFn<(), (), Fut> for InitFn<Fut>
+impl<Fut> WorkFn<(), ()> for InitFn<Fut>
 where
-    Fut: Future<Output = ()>,
+    Fut: Future<Output = ()> + 'static,
 {
-    fn work(&self, _req: ()) -> Fut {
-        (self.inner)()
+    fn work(&self, _req: ()) -> Async<()> {
+        Box::pin((self.inner)())
     }
 }
