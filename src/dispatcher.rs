@@ -1,4 +1,6 @@
-use std::{cell::RefCell, fmt::Debug, num::NonZeroUsize, rc::Rc, sync::Arc, thread};
+use std::{
+    cell::RefCell, fmt::Debug, num::NonZeroUsize, rc::Rc, sync::Arc, thread, time::Duration,
+};
 
 use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
@@ -41,6 +43,7 @@ pub(crate) fn setup<Req, Resp, WFn, Fut, IFn, Si, PSi, Sched>(
     make_work_fn: impl Fn() -> WFn + Send + Sync + 'static,
     make_init_fn: impl Fn() -> IFn + Send + Sync + 'static,
     sched: Box<Sched>,
+    shutdown_grace_period: Duration,
 ) -> Handle<Req>
 where
     Req: Request,
@@ -71,7 +74,7 @@ where
         // Creating new pairs of tx/rx because we need to tell which worker abruptly exited
         let (resp_tx, resp_rx) = unbounded();
         let (panic_tx, panic_rx) = unbounded();
-        let worker = Worker::new(i, resp_tx, panic_tx);
+        let worker = Worker::new(i, resp_tx, panic_tx, shutdown_grace_period);
         agents.push(worker.new_agent());
         resp_rxs.push((resp_rx, panic_rx));
         let make_task_fut_cp = Arc::clone(&make_task_fut);
@@ -156,7 +159,7 @@ where
                         if !*is_shutting_down.borrow() {
                             let (resp_tx, resp_rx) = unbounded();
                             let (panic_tx, panic_rx) = unbounded();
-                            let worker = Worker::new(i, resp_tx, panic_tx);
+                            let worker = Worker::new(i, resp_tx, panic_tx, shutdown_grace_period);
                             agents.borrow_mut()[i] = worker.new_agent();
                             workloads.borrow_mut()[i] = 0usize.into();
 

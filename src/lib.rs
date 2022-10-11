@@ -24,7 +24,7 @@
 //!     }
 //! }
 //!
-//! // WorkFn is implemented for async fns that take a Request type parameter and return a Send + 'static 
+//! // WorkFn is implemented for async fns that take a Request type parameter and return a Send + 'static
 //! async fn work(req: HelloOrEcho) -> String {
 //!     match req {
 //!         HelloOrEcho::Hello => "Hello".to_owned(),
@@ -71,6 +71,7 @@
 
 use std::{
     fmt::Debug, future::Future, marker::PhantomData, num::NonZeroUsize, pin::Pin, sync::Arc,
+    time::Duration,
 };
 
 mod dispatcher;
@@ -152,6 +153,7 @@ where
 /// * `sink` - `Sink` used by the dispatcher to send back responses
 /// * `panic_sink` - `Sink` used by the dispatcher to send back `PanicInfo`s
 /// * `sched` - `Scheduler` that decides how incoming requests are dispatched to workers based on their workloads
+/// * `shutdown_grace_period` - seconds to wait since the last request before
 pub struct Builder<Req, Resp, Fut, WFn, IFn, Si, PSi, Sched> {
     num_workers: NonZeroUsize,
     make_work_fn: Box<dyn Fn() -> WFn + Send + Sync + 'static>,
@@ -159,6 +161,7 @@ pub struct Builder<Req, Resp, Fut, WFn, IFn, Si, PSi, Sched> {
     sink: Si,
     panic_sink: PSi,
     sched: Sched,
+    shutdown_grace_period: Duration,
     _pd: PhantomData<(Req, Resp, Fut)>,
 }
 
@@ -189,8 +192,17 @@ where
             sink: NoopSink::new(),
             panic_sink: NoopSink::new(),
             sched: P2cScheduler::new(num_workers),
+            shutdown_grace_period: Duration::from_secs(30),
             _pd: PhantomData,
         }
+    }
+}
+
+impl<Req, Resp, Fut, WFn, IFn, Si, PSi, Sched> Builder<Req, Resp, Fut, WFn, IFn, Si, PSi, Sched> {
+    /// Sets `shutdown_grace_period`.
+    pub fn shutdown_grace_period(mut self, period: Duration) -> Self {
+        self.shutdown_grace_period = period;
+        self
     }
 }
 
@@ -236,6 +248,7 @@ impl<Req, Resp, Fut, WFn, Si, PSi, Sched> Builder<Req, Resp, Fut, WFn, NoopInitF
             sink: self.sink,
             panic_sink: self.panic_sink,
             sched: self.sched,
+            shutdown_grace_period: self.shutdown_grace_period,
             _pd: PhantomData,
         }
     }
@@ -257,6 +270,7 @@ impl<Req, Resp, Fut, WFn, IFn, PSi, Sched>
             sink,
             panic_sink: self.panic_sink,
             sched: self.sched,
+            shutdown_grace_period: self.shutdown_grace_period,
             _pd: PhantomData,
         }
     }
@@ -281,6 +295,7 @@ impl<Req, Resp, Fut, WFn, IFn, Si, Sched>
             sink: self.sink,
             panic_sink,
             sched: self.sched,
+            shutdown_grace_period: self.shutdown_grace_period,
             _pd: PhantomData,
         }
     }
@@ -308,6 +323,7 @@ where
             self.make_work_fn,
             self.make_init_fn,
             Box::new(self.sched),
+            self.shutdown_grace_period,
         )
     }
 }

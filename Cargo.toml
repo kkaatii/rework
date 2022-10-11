@@ -1,6 +1,6 @@
 [package]
 name = "rework"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Multi-threaded task processing in the Master-Worker pattern."
@@ -9,7 +9,7 @@ readme = "README.md"
 keywords = ["task", "job", "async"]
 
 [dependencies]
-pandet = "0.2.2"
+pandet = "0.3.0"
 futures = "0.3"
 tracing = "0.1.34"
 tokio = { version = "1", features = ["rt", "time", "macros"] }

@@ -45,8 +45,7 @@ struct ConnTimeout {
 }
 
 impl ConnTimeout {
-    pub fn new(thres_secs: u64) -> Self {
-        let thres = Duration::from_secs(thres_secs);
+    pub fn new(thres: Duration) -> Self {
         ConnTimeout {
             thres,
             last: Instant::now(),
@@ -108,6 +107,7 @@ pub(crate) struct Worker<Req, Resp> {
     resp_tx: UnboundedSender<(Workload, Resp)>,
     panic_tx: UnboundedSender<(Workload, PanicInfo)>,
     cmd_rx: Receiver<Command>,
+    shutdown_grace_period: Duration,
 }
 
 impl<Req, Resp> Worker<Req, Resp> {
@@ -115,6 +115,7 @@ impl<Req, Resp> Worker<Req, Resp> {
         id: usize,
         resp_tx: UnboundedSender<(Workload, Resp)>,
         panic_tx: UnboundedSender<(Workload, PanicInfo)>,
+        shutdown_grace_period: Duration,
     ) -> Self {
         let (req_tx, req_rx) = unbounded();
         let (cmd_tx, cmd_rx) = channel(0);
@@ -126,6 +127,7 @@ impl<Req, Resp> Worker<Req, Resp> {
             resp_tx,
             panic_tx,
             cmd_rx,
+            shutdown_grace_period,
         }
     }
 
@@ -175,12 +177,11 @@ impl<Req, Resp> Worker<Req, Resp> {
                 // FIXME: memory leak if worker thread exited prematurely
                 let inner_worker: &'static InnerWorker<_, _, _, _> = &*Box::leak(inner_worker);
 
-                let monitor = &mut PanicMonitor::<(usize, String, Workload)>::new();
-                let det = monitor.new_detector();
+                let (ref mut monitor, det) = PanicMonitor::<(usize, String, Workload)>::new();
 
                 let fut = async move {
                     let shutting_down = &mut false;
-                    let conn_timeout = ConnTimeout::new(30);
+                    let conn_timeout = ConnTimeout::new(self.shutdown_grace_period);
                     tokio::pin!(conn_timeout);
                     loop {
                         tokio::select! {
@@ -223,8 +224,7 @@ impl<Req, Resp> Worker<Req, Resp> {
                 };
                 task::spawn_local(fut);
 
-                monitor.drop_detector();
-                while let Some(Err(e)) = monitor.next().await {
+                while let Some(e) = monitor.next().await {
                     let (req_id, kind, wl) = e.0;
                     warn!("Panic detected when working on work-req{{id={req_id}}} {kind}");
                     let _ = send(
